@@ -17,6 +17,7 @@ exports.makeRoutes = (baseRoutes, {
 }) => {
   locales = getLocaleCodes(locales)
   let localizedRoutes = []
+  const pageOptionsMap = { byPath: {}, byName: {}, all: [] }
 
   const buildLocalizedRoutes = (route, routeOptions = {}, isChild = false, isExtraRouteTree = false) => {
     const routes = []
@@ -141,6 +142,13 @@ exports.makeRoutes = (baseRoutes, {
       if (strategy === STRATEGIES.NO_PREFIX && localizedRoute.path === route.path) {
         // skip
       } else {
+        if (!pageOptionsMap.byName[route.name]) {
+          pageOptionsMap.byName[route.name] = {}
+          pageOptionsMap.byPath[route.path] = {}
+        }
+        const size = pageOptionsMap.all.push({ n: localizedRoute.name, p: localizedRoute.path })
+        pageOptionsMap.byName[route.name][locale] = size - 1
+        pageOptionsMap.byPath[route.path][locale] = size - 1
         routes.push(localizedRoute)
       }
     }
@@ -166,6 +174,8 @@ exports.makeRoutes = (baseRoutes, {
   } catch (error) {
     // Ignore
   }
+
+  console.info(JSON.stringify(pageOptionsMap, null, 2))
 
   return localizedRoutes
 }
