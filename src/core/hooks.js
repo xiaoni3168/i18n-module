@@ -1,4 +1,5 @@
-import { MODULE_NAME, STRATEGIES } from '../helpers/constants'
+import { resolve, join } from 'path'
+import { MODULE_NAME, ROOT_DIR, STRATEGIES } from '../helpers/constants'
 
 export function createExtendRoutesHook (moduleContainer, options) {
   const nuxtOptions = moduleContainer.options
@@ -17,7 +18,7 @@ export function createExtendRoutesHook (moduleContainer, options) {
     // not available (at runtime, when using nuxt-start).
     const { makeRoutes } = require('../helpers/routes')
 
-    const localizedRoutes = makeRoutes(routes, {
+    const { localizedRoutes, customPathsMap } = makeRoutes(routes, {
       ...options,
       pagesDir,
       includeUprefixedFallback,
@@ -25,6 +26,13 @@ export function createExtendRoutesHook (moduleContainer, options) {
     })
     routes.splice(0, routes.length)
     routes.unshift(...localizedRoutes)
+
+    const templatesPath = join(__dirname, '..', '/templates')
+    moduleContainer.addTemplate({
+      src: resolve(templatesPath, 'options.js'),
+      fileName: join(ROOT_DIR, 'route-map.js'),
+      options: { customPathsMap }
+    })
   }
 }
 

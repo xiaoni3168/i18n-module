@@ -1,3 +1,4 @@
+const { posix: { join } } = require('path')
 const { STRATEGIES } = require('./constants')
 const { extractComponentOptions } = require('./components')
 const { getPageOptions, getLocaleCodes } = require('./utils')
@@ -17,17 +18,43 @@ exports.makeRoutes = (baseRoutes, {
 }) => {
   locales = getLocaleCodes(locales)
   let localizedRoutes = []
-  const pageOptionsMap = { byPath: {}, byName: {}, all: [] }
+  const customPathsMap = { byPath: {}, byName: {}, all: [] }
 
-  const buildLocalizedRoutes = (route, routeOptions = {}, isChild = false, isExtraRouteTree = false) => {
+  const buildLocalizedRoutes = (route, routeOptions = {}, parentRoutePath = '', isExtraRouteTree = false) => {
     const routes = []
-    let pageOptions
+
+    const addRoute = (localizedRoute, locale, parentRoutePath) => {
+      routes.push(localizedRoute)
+
+      if (route.name) {
+        const fullPath = join(parentRoutePath, route.path)
+        if (!customPathsMap.byName[route.name]) {
+          customPathsMap.byName[route.name] = {}
+        }
+        if (!customPathsMap.byPath[fullPath]) {
+          customPathsMap.byPath[fullPath] = {}
+        }
+
+        // For "prefix_and_default" strategy we take only first route (without the prefix) for given locale.
+        if (!customPathsMap.byName[route.name][locale] || !!customPathsMap.byPath[fullPath][locale]) {
+          const localizedFullPath = join(parentRoutePath, localizedRoute.path)
+          const size = customPathsMap.all.push({ n: localizedRoute.name, p: localizedFullPath })
+          if (!customPathsMap.byName[route.name][locale]) {
+            customPathsMap.byName[route.name][locale] = size - 1
+          }
+          if (!customPathsMap.byPath[fullPath][locale]) {
+            customPathsMap.byPath[fullPath][locale] = size - 1
+          }
+        }
+      }
+    }
 
     // Skip route if it is only a redirect without a component.
     if (route.redirect && !route.component) {
       return route
     }
 
+    let pageOptions
     // Extract i18n options from page
     if (parsePages) {
       pageOptions = extractComponentOptions(route.component)
@@ -66,17 +93,17 @@ exports.makeRoutes = (baseRoutes, {
         localizedRoute.name = name + routesNameSeparator + locale
       }
 
+      // Get custom path if any
+      if (componentOptions.paths && componentOptions.paths[locale]) {
+        path = componentOptions.paths[locale]
+      }
+
       // Generate localized children routes if any
       if (route.children) {
         localizedRoute.children = []
         for (let i = 0, length1 = route.children.length; i < length1; i++) {
-          localizedRoute.children = localizedRoute.children.concat(buildLocalizedRoutes(route.children[i], { locales: [locale] }, true, isExtraRouteTree))
+          localizedRoute.children = localizedRoute.children.concat(buildLocalizedRoutes(route.children[i], { locales: [locale] }, parentRoutePath + path, isExtraRouteTree))
         }
-      }
-
-      // Get custom path if any
-      if (componentOptions.paths && componentOptions.paths[locale]) {
-        path = componentOptions.paths[locale]
       }
 
       const isDefaultLocale = locale === defaultLocale
@@ -85,7 +112,7 @@ exports.makeRoutes = (baseRoutes, {
       // - if it's a parent route, add it with default locale suffix added (no suffix if route has children)
       // - if it's a child route of that extra parent route, append default suffix to it
       if (isDefaultLocale && strategy === STRATEGIES.PREFIX_AND_DEFAULT) {
-        if (!isChild) {
+        if (!parentRoutePath) {
           const defaultRoute = { ...localizedRoute, path }
 
           if (name) {
@@ -97,17 +124,17 @@ exports.makeRoutes = (baseRoutes, {
             defaultRoute.children = []
             for (const childRoute of route.children) {
               // isExtraRouteTree argument is true to indicate that this is extra route added for PREFIX_AND_DEFAULT strategy
-              defaultRoute.children = defaultRoute.children.concat(buildLocalizedRoutes(childRoute, { locales: [locale] }, true, true))
+              defaultRoute.children = defaultRoute.children.concat(buildLocalizedRoutes(childRoute, { locales: [locale] }, path, true))
             }
           }
 
-          routes.push(defaultRoute)
-        } else if (isChild && isExtraRouteTree && name) {
+          addRoute(defaultRoute, locale, parentRoutePath)
+        } else if (parentRoutePath && isExtraRouteTree && name) {
           localizedRoute.name += routesNameSeparator + defaultLocaleRouteNameSuffix
         }
       }
 
-      const isChildWithRelativePath = isChild && !path.startsWith('/')
+      const isChildWithRelativePath = parentRoutePath && !path.startsWith('/')
 
       // Add route prefix if needed
       const shouldAddPrefix = (
@@ -132,32 +159,12 @@ exports.makeRoutes = (baseRoutes, {
       }
 
       if (shouldAddPrefix && isDefaultLocale && strategy === STRATEGIES.PREFIX && includeUprefixedFallback) {
-        routes.push({
-          ...route
-        })
+        addRoute({ path: route.path, redirect: path }, locale, parentRoutePath)
       }
 
       localizedRoute.path = path
 
-      if (strategy === STRATEGIES.NO_PREFIX && localizedRoute.path === route.path) {
-        // skip
-      } else {
-        if (!pageOptionsMap.byName[route.name]) {
-          pageOptionsMap.byName[route.name] = {}
-          pageOptionsMap.byPath[route.path] = {}
-        }
-        const size = pageOptionsMap.all.push({ n: localizedRoute.name, p: localizedRoute.path })
-        pageOptionsMap.byName[route.name][locale] = size - 1
-        pageOptionsMap.byPath[route.path][locale] = size - 1
-        routes.push(localizedRoute)
-      }
-    }
-
-    if (strategy === STRATEGIES.NO_PREFIX) {
-      // To avoid duplicate paths, only add original route if there is no route with that path already.
-      if (!routes.find(r => r.path === route.path)) {
-        routes.push(route)
-      }
+      addRoute(localizedRoute, locale, parentRoutePath)
     }
 
     return routes
@@ -175,7 +182,7 @@ exports.makeRoutes = (baseRoutes, {
     // Ignore
   }
 
-  console.info(JSON.stringify(pageOptionsMap, null, 2))
+  console.info(JSON.stringify(customPathsMap, null, 2))
 
-  return localizedRoutes
+  return { localizedRoutes, customPathsMap }
 }
